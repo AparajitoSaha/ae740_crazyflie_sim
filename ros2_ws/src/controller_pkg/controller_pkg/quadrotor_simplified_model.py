@@ -46,10 +46,31 @@ class QuadrotorSimplified:
         pxdot = vx
         pydot = vy
         pzdot = vz 
-        # vxdot = 
-        # vydot = 
-        # vzdot = 
 
+        cr = cos(roll);  sr = sin(roll)
+        cp = cos(pitch); sp = sin(pitch)
+        cy = cos(yaw);   sy = sin(yaw)
+        
+        Rx = vertcat(
+            horzcat(1,      0,      0),
+            horzcat(0,     cr,    -sr),
+            horzcat(0,     sr,     cr)
+        )
+        Ry = vertcat(
+            horzcat( cp,    0,   sp),
+            horzcat(  0,    1,    0),
+            horzcat(-sp,    0,   cp)
+        )
+        Rz = vertcat(
+            horzcat(cy,  -sy, 0),
+            horzcat(sy,   cy, 0),
+            horzcat( 0,    0, 1)
+        )
+        R = times(times(Rz, Ry), Rx)          # R = Rz * Ry * Rx
+        b3 = times(R, vertcat(0, 0, 1))       # third column
+        vxdot = (thrust / self.mass) * b3[0]
+        vydot = (thrust / self.mass) * b3[1]
+        vzdot = (thrust / self.mass) * b3[2] - self.gravity    
 
         # Linear first-order attitude dymamics
         rolldot = (roll_c - roll) / self.tau

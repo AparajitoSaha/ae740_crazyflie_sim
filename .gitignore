@@ -7,3 +7,5 @@ crazyfle-lib-python/*
 overview.md
 crazyflie-firmware/sitl_make/build/*
 !ros2_ws/src/crazyswarm2/crazyflie/deps/crazyflie_tools/crazyflie_cpp/crazyflie-link-cpp/tools
+*.pyc
+__pycache__/
