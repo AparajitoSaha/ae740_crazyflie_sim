@@ -87,14 +87,13 @@ class CrazyflieMPC(rclpy.node.Node):
         # topic type -> Path
         # topic name -> {prefix}/mpc_solution_path
         # publisher variable -> self.mpc_solution_path_pub
-        self.mpc_path_pub = self.create_publisher(Path, f'{prefix}/mpc_solution_path', 10)
+        self.mpc_solution_path_pub = self.create_publisher(Path, f'{prefix}/mpc_solution_path', 10)
 
         # (d) Attitude setpoint command publisher
         # topic type -> AttitudeSetpoint
         # topic name -> {prefix}/cmd_attitude_setpoint
         # publisher variable -> self.attitude_setpoint_pub
         self.attitude_setpoint_pub = self.create_publisher(AttitudeSetpoint, f'{prefix}/cmd_attitude_setpoint', 10)
-        
         self.takeoffService = self.create_subscription(Empty, f'/all/mpc_takeoff', self.takeoff, 10)
         self.landService = self.create_subscription(Empty, f'/all/mpc_land', self.land, 10)
         self.trajectoryService = self.create_subscription(Empty, f'/all/mpc_trajectory', self.start_trajectory, 10)
@@ -124,13 +123,26 @@ class CrazyflieMPC(rclpy.node.Node):
     #   2. You can use tf_transformations for the conversion into different orientation representations. 
     #   3. Be sure to wrap the attitude angles between -pi to +pi. 
 
-    def _pose_msg_callback(self, msg: PoseStamped):
-      self.position = self.get_logger().info([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])
-      y = self.get_logger().info([tf_transformations.euler_from_quaternion([msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w])[i] for i in range(3)])
-      self.attitude = self.get_logger().info([((y[i] + np.pi) % (2.0 * np.pi)) - np.pi for i in range(3)])
+    # def _pose_msg_callback(self, msg: PoseStamped):
+    #   self.position = self.get_logger().info([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])
+    #   y = self.get_logger().info([tf_transformations.euler_from_quaternion([msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w])[i] for i in range(3)])
+    #   self.attitude = self.get_logger().info([((y[i] + np.pi) % (2.0 * np.pi)) - np.pi for i in range(3)])
     
+    # def _twist_msg_callback(self, msg: TwistStamped):
+    #   self.velocity = self.get_logger().info([msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z])
+
+    def _pose_msg_callback(self, msg: PoseStamped):
+        self.position = [msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]
+        q = [msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w]
+        roll, pitch, yaw = tf_transformations.euler_from_quaternion(q)
+        def wrap(a):  # wrap to [-pi, pi]
+            return ((a + np.pi) % (2.0 * np.pi)) - np.pi
+        self.attitude = [wrap(roll), wrap(pitch), wrap(yaw)]
+        self.get_logger().info(f"pos={self.position}, rpy={self.attitude}")
+
     def _twist_msg_callback(self, msg: TwistStamped):
-      self.velocity = self.get_logger().info([msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z])
+        self.velocity = [msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z]
+        self.get_logger().info(f"vel={self.velocity}")
 
 
     def start_trajectory(self, msg):
@@ -244,7 +256,7 @@ class CrazyflieMPC(rclpy.node.Node):
         # [TODO] PART 6: Load the initial state variable and reference variable for the MPC problem
         #                   and solve the MPC problem at the current time step
         # 
-        x0 = [self.position[0], self.position[1], self.position[2], self.velocity[0], self.velocity[1], self.velocity[2], self.attitude[0], self.attitude[1], self.attitude[2]]
+        # x0 = ... (numpy array (size=9) of the crazyflie state -> position, velocity, attitude)
         # yref = ... (2D numpy array of the reference trajectory) (shape = NUM_STATE_VAR, NUM_MPC_STEPS)
         # yref_e = ... (1D numpy array for the terminal state variable (size=NUM_STATE_VAR))
         #
@@ -263,11 +275,12 @@ class CrazyflieMPC(rclpy.node.Node):
         yref   = traj_all[:, :self.mpc_N]                       # (9, N)
         yref_e = traj_all[:, self.mpc_N]                        # (9,)
 
+        print(f"Solving MPC at t={t:.2f}s with x0={x0} and yref_e={yref_e}")
+        
         # solve the MPC
         status, x_mpc, u_mpc = self.mpc_solver.solve_mpc(x0, yref, yref_e)
         if status != 0:
             self.get_logger().warning(f"MPC solver returned non-zero status: {status}")
-
 
         self.control_queue = deque(u_mpc)
 
