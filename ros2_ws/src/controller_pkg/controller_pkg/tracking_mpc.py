@@ -125,20 +125,42 @@ class TrajectoryTrackingMpc:
         from pathlib import Path
         import os
 
+        from pathlib import Path
+        import os
+        import importlib
+        import acados_template  # <-- key addition
+
         cg_dir = Path(ocp.code_export_directory)  # .../acados_generated_files/c_generated_code
         mk = cg_dir / "Makefile"
 
-        # Patch the generated Makefile so Cython includes the correct template folder
+        # Resolve the template dir:
+        # 1) honor env var if provided
+        # 2) otherwise derive from the installed package location
+        pkg_templates_dir = Path(acados_template.__file__).resolve().parent  # .../site-packages/acados_template
+        templ_dir = os.environ.get("ACADOS_PYTHON_INTERFACE_PATH", str(pkg_templates_dir))
+
         if mk.exists():
             txt = mk.read_text()
-            templ_dir = os.environ.get(
-                "ACADOS_PYTHON_INTERFACE_PATH",
-                "/home/robin/ae740_labs/acados/interfaces/acados_template/acados_template",
-            )
-            txt = txt.replace(
-                "$(INCLUDE_PATH)/../interfaces/acados_template/acados_template",
-                templ_dir
-            )
+            needle = "$(INCLUDE_PATH)/../interfaces/acados_template/acados_template"
+            if needle in txt:
+                txt = txt.replace(needle, templ_dir)
+                mk.write_text(txt)
+
+
+        # cg_dir = Path(ocp.code_export_directory)  # .../acados_generated_files/c_generated_code
+        # mk = cg_dir / "Makefile"
+
+        # # Patch the generated Makefile so Cython includes the correct template folder
+        # if mk.exists():
+        #     txt = mk.read_text()
+        #     templ_dir = os.environ.get(
+        #         "ACADOS_PYTHON_INTERFACE_PATH",
+        #         "/home/robin/ae740_labs/acados/interfaces/acados_template/acados_template",
+        #     )
+        #     txt = txt.replace(
+        #         "$(INCLUDE_PATH)/../interfaces/acados_template/acados_template",
+        #         templ_dir
+        #     )
             mk.write_text(txt)
 
         # now build
