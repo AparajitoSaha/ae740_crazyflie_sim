@@ -1,4 +1,4 @@
-from casadi import MX, vertcat, horzcat, diag, inv_minor, cross, sqrt, cos, sin, times
+from casadi import MX, vertcat, horzcat, diag, inv_minor, cross, sqrt, cos, sin, mtimes
 import numpy as np
 
 class QuadrotorSimplified:
@@ -66,8 +66,8 @@ class QuadrotorSimplified:
             horzcat(sy,   cy, 0),
             horzcat( 0,    0, 1)
         )
-        R = times(times(Rz, Ry), Rx)          # R = Rz * Ry * Rx
-        b3 = times(R, vertcat(0, 0, 1))       # third column
+        R = mtimes(mtimes(Rz, Ry), Rx)          # R = Rz * Ry * Rx
+        b3 = mtimes(R, vertcat(0, 0, 1))       # third column
         vxdot = (thrust / self.mass) * b3[0]
         vydot = (thrust / self.mass) * b3[1]
         vzdot = (thrust / self.mass) * b3[2] - self.gravity    

@@ -186,14 +186,15 @@ class CrazyflieMPC(rclpy.node.Node):
 
     def trajectory_function(self, t):
         if self.trajectory_type == 'horizontal_circle': 
-          a = 4.0 # radius
-          omega = 0.5 # angular velocity
-          pxr = self.trajectory_start_position[0] + a * np.cos(omega * t)
-          pyr = self.trajectory_start_position[1] + a * np.sin(omega * t)
-          pzr = self.trajectory_start_position[2]
-          vxr = -a*omega * np.sin(omega * t)
-          vyr = a*omega * np.cos(omega * t)  
-          vzr = 0
+            a = 1.0 # radius
+            omega = 0.2 # angular velocity
+            x0, y0, z0 = self.trajectory_start_position
+            pxr = x0 + a * (np.cos(omega * t) - 1.0)
+            pyr = y0 + a *  np.sin(omega * t)
+            pzr = z0
+            vxr = -a * omega * np.sin(omega * t)
+            vyr =  a * omega * np.cos(omega * t)
+            vzr = 0.0
 
         return np.array([pxr,pyr,pzr,vxr,vyr,vzr,0.,0.,0.])
 
@@ -267,15 +268,68 @@ class CrazyflieMPC(rclpy.node.Node):
         #   2. Remember that self.position etc. are all python lists (not numpy arrays)
         #   3. Use the solve_mpc() method from the mpc_solver object, see the function in the tracking_mpc.py file
 
+        # # current state (lists -> numpy array)
+        # x0 = np.array([*self.position, *self.velocity, *self.attitude], dtype=float)
+
+        # # navigator(t) returns shape (9, N+1): first N columns are stage refs, last is terminal
+        # traj_all = np.asarray(trajectory, dtype=float)          # (9, N+1)
+        # yref   = traj_all[:, :self.mpc_N]                       # (9, N)
+        # yref_e = traj_all[:, self.mpc_N]                        # (9,)
+
+
         # current state (lists -> numpy array)
         x0 = np.array([*self.position, *self.velocity, *self.attitude], dtype=float)
 
-        # navigator(t) returns shape (9, N+1): first N columns are stage refs, last is terminal
-        traj_all = np.asarray(trajectory, dtype=float)          # (9, N+1)
-        yref   = traj_all[:, :self.mpc_N]                       # (9, N)
-        yref_e = traj_all[:, self.mpc_N]                        # (9,)
+        traj_all = np.asarray(trajectory, dtype=float)
 
-        print(f"Solving MPC at t={t:.2f}s with x0={x0} and yref_e={yref_e}")
+        # Ensure (9, N+1)
+        if traj_all.shape[1] == self.mpc_N:
+            traj_all = np.concatenate([traj_all, traj_all[:, -1:]], axis=1)
+
+        # Finite-difference velocities from position refs
+        dt = float(self.mpc_tf) / float(self.mpc_N)
+        pos = traj_all[0:3, :]
+        vel_fd = np.zeros_like(pos)
+        vel_fd[:, :-1] = (pos[:, 1:] - pos[:, :-1]) / dt
+        vel_fd[:, -1]  = vel_fd[:, -2]
+
+        # Cap vertical speed gently
+        vz_max = 0.10
+        vel_fd[2, :] = np.clip(vel_fd[2, :], -vz_max, vz_max)
+        traj_all[3:6, :] = vel_fd
+
+        # Hold current yaw as reference (wrapped)
+        def wrap(a): return ((a + np.pi) % (2.0 * np.pi)) - np.pi
+        yaw_r = wrap(self.attitude[2]) if len(self.attitude) == 3 else 0.0
+        traj_all[6, :] = 0.0
+        traj_all[7, :] = 0.0
+        traj_all[8, :] = yaw_r
+
+        # Ease terminal jump if the last step is large: duplicate last-1 into last
+        if np.linalg.norm(traj_all[0:3, -1] - traj_all[0:3, -2]) > 0.03:
+            traj_all[:, -1] = traj_all[:, -2]
+
+        yref   = traj_all[:, :self.mpc_N]
+        yref_e = traj_all[:, self.mpc_N]
+
+
+        # Warm start the solver
+        ocp = self.mpc_solver.ocp_solver
+        N = self.mpc_N
+        u_hover = self.mpc_solver.hover_control.copy()
+
+        for i in range(N):
+            ocp.set(i, 'x', yref[:, i])
+        ocp.set(N, 'x', yref_e)
+
+        for i in range(N):
+            ocp.set(i, 'u', u_hover)
+
+        ocp.set(0, 'x', x0)
+
+
+        # print(f"Solving MPC at t={t:.2f}s with x0={x0}, yref={yref}, and yref_e={yref_e}")
+
         
         # solve the MPC
         status, x_mpc, u_mpc = self.mpc_solver.solve_mpc(x0, yref, yref_e)

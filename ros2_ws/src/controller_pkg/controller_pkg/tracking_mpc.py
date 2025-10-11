@@ -66,35 +66,25 @@ class TrajectoryTrackingMpc:
         # max_X = ... [m]
         # max_Y = ... [m]
 
-        # # ---- Cost weights ----
-        # # State order: [px, py, pz, vx, vy, vz, roll, pitch, yaw]
-        # Q = np.diag([
-        #     20.0, 20.0, 40.0,   # positions
-        #     4.0,  4.0,  6.0,    # velocities
-        #     8.0,  8.0,  4.0     # roll, pitch, yaw
-        # ])
-        # # Control order: [roll_c, pitch_c, yaw_c, thrust]
-        # # Keep thrust penalty small; we track it around hover via yref anyway.
-        # R = np.diag([2.0,   2.0,   0.5,   1e-3])
-        # W = block_diag(Q, R)
+        # ---- Cost weights ----
+        # State order: [px, py, pz, vx, vy, vz, roll, pitch, yaw]
+        Q = np.diag([
+            20.0, 20.0, 40.0,   # positions
+            4.0,  4.0,  6.0,    # velocities
+            8.0,  8.0,  4.0     # roll, pitch, yaw
+        ])
+        # Control order: [roll_c, pitch_c, yaw_c, thrust]
+        # Keep thrust penalty small; we track it around hover via yref anyway.
+        R = np.diag([2.0,   2.0,   0.5,   1e-3])
+        W = block_diag(Q, R)
 
-        # # ---- Constraints ----
-        # max_angle    = np.radians(30.0)                    # rad
-        # max_thrust   = 2.0 * self.quad.mass * self.quad.gravity   # N (≈ 2g headroom)
-        # max_height   = 3.0                                 # m
-        # max_velocity = 3.0                                 # m/s
-        # max_X        = 5.0                                 # m
-        # max_Y        = 5.0                                 # m
-
-        Q = np.diag([10., 10., 10., 1., 1., 1., 100., 100., 10.])
-        R = np.diag([1., 1., 10., 0.1])
-        W = block_diag(Q,R)
-        max_angle = np.radians(60)
-        max_thrust = 2.0*self.quad.mass*self.quad.gravity * 100
-        max_height = 10.0 * 100
-        max_velocity = 5.0 * 100
-        max_X = 10.0 * 100
-        max_Y = 10.0 * 100
+        # ---- Constraints ----
+        max_angle    = np.radians(60.0)                    # rad
+        max_thrust   = 4.0 * self.quad.mass * self.quad.gravity   # N
+        max_height   = 10.0                                 # m
+        max_velocity = 5.0                                 # m/s
+        max_X        = 10.0                                 # m
+        max_Y        = 10.0                                 # m
 
         ocp.cost.cost_type = 'LINEAR_LS'
         ocp.cost.Vx = np.vstack([np.identity(nx), np.zeros((nu,nx))])
