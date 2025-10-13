@@ -82,30 +82,33 @@ class CrazyflieMPC(rclpy.node.Node):
         # topic type -> PoseStamped
         # topic name -> {prefix}/pose (e.g., '/cf_1/pose')
         # callback -> self._pose_msg_callback
+        self.position_subscriber = self.create_subscription(PoseStamped, f'{prefix}/pose', self._pose_msg_callback, 10)
 
         # (b) Velocity subscriber
         # topic type -> TwistStamped
         # topic name -> {prefix}/twist
         # callback -> self._twist_msg_callback
+        self.velocity_subscriber = self.create_subscription(TwistStamped, f'{prefix}/twist', self._twist_msg_callback, 10)
 
         # (c) MPC solution path publisher
         # topic type -> Path
         # topic name -> {prefix}/mpc_solution_path
         # publisher variable -> self.mpc_solution_path_pub
+        self.mpc_solution_path_pub = self.create_publisher(Path, f'{prefix}/mpc_solution_path', 10)
 
         # (d) Attitude setpoint command publisher
         # topic type -> AttitudeSetpoint
         # topic name -> {prefix}/cmd_attitude_setpoint
         # publisher variable -> self.attitude_setpoint_pub
+        self.attitude_setpoint_pub = self.create_publisher(AttitudeSetpoint, f'{prefix}/cmd_attitude_setpoint', 10)
 
         # [TODO LAB 4] Add a ROS2 subscriber for the target Crazyflie position
         # (e) Target position subscriber
         # topic type -> PoseStamped
-        # topic name -> {target_prefix}/pose 
-        # callback -> self._target_pose_msg_callback    
+        # topic name -> {target_prefix}/pose
+        # callback -> self._target_pose_msg_callback
+        self.target_pose_subscriber = self.create_subscription(PoseStamped, f'{target_prefix}/pose', self._target_pose_msg_callback, 10)
 
-
-        
         
         self.takeoffService = self.create_subscription(Empty, f'/all/mpc_takeoff', self.takeoff, 10)
         self.landService = self.create_subscription(Empty, f'/all/mpc_land', self.land, 10)
@@ -118,7 +121,9 @@ class CrazyflieMPC(rclpy.node.Node):
         # [TODO] PART 2: Add ROS2 timers for the main control loop (callback -> self._main_loop) and 
         #                the MPC solver loop (self._mpc_solver_loop). This is part of __init__().
         # Hint: Keep in mind that the variable self.rate is the control update rate specified in Hz
-        
+        self.control_timer = self.create_timer(1.0/self.rate, self._main_loop)
+        self.mpc_timer = self.create_timer(1.0/self.rate, self._mpc_solver_loop)
+                
 
 
     # Be careful about indentation, this is outside __init()__
@@ -141,10 +146,34 @@ class CrazyflieMPC(rclpy.node.Node):
     # def _twist_msg_callback(self, msg: TwistStamped):
     #   self.velocity = ...
 
+    def _pose_msg_callback(self, msg: PoseStamped):
+        self.position = [msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]
+        q = [msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w]
+        roll, pitch, yaw = tf_transformations.euler_from_quaternion(q)
+        def wrap(a):  # wrap to [-pi, pi]
+            return ((a + np.pi) % (2.0 * np.pi)) - np.pi
+        self.attitude = [wrap(roll), wrap(pitch), wrap(yaw)]
+        self.get_logger().info(f"pos={self.position}, rpy={self.attitude}")
+
+    def _twist_msg_callback(self, msg: TwistStamped):
+        self.velocity = [msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z]
+        self.get_logger().info(f"vel={self.velocity}")
+
+
+
+
     # [TODO LAB 4] Implement the target position callback function (use self.target_position variable).
     # def _target_pose_msg_callback(self, msg: PoseStamped):
     #   self.target_position = ...
 
+    def _target_pose_msg_callback(self, msg: PoseStamped):
+        self.target_position = [msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]
+        self.get_logger().info(f"target_pos={self.target_position}")
+        
+        
+        
+        
+        
 
     def start_trajectory(self, msg):
         self.trajectory_changed = True
@@ -186,14 +215,20 @@ class CrazyflieMPC(rclpy.node.Node):
     # - The last three values (zeros) are the euler angles (attitude references)
 
     # def trajectory_function(self, t):
-    #     if self.trajectory_type == 'horizontal_circle':  
-    #       pxr = 
-    #       pyr = 
-    #       ...
-    #       vzr = 
+    #     if self.trajectory_type == 'horizontal_circle': 
+    #         a = 1.0 # radius
+    #         omega = 0.2 # angular velocity
+    #         x0, y0, z0 = self.trajectory_start_position
+    #         pxr = x0 + a * (np.cos(omega * t) - 1.0)
+    #         pyr = y0 + a *  np.sin(omega * t)
+    #         pzr = z0
+    #         vxr = -a * omega * np.sin(omega * t)
+    #         vyr =  a * omega * np.cos(omega * t)
+    #         vzr = 0.0
 
     #     return np.array([pxr,pyr,pzr,vxr,vyr,vzr,0.,0.,0.])
-
+    
+    
     # [TODO LAB 4] Implement the trajectory type 'target_tracking' to follow the target drone.
     # Instructions:
     # - In the trajectory_function, add a case for 'target_tracking'.
@@ -201,6 +236,29 @@ class CrazyflieMPC(rclpy.node.Node):
     #
     #     if self.trajectory_type == 'target_tracking':  
     #         ...
+
+    def trajectory_function(self, t):
+        if self.trajectory_type == 'horizontal_circle': 
+            a = 1.0 # radius
+            omega = 0.2 # angular velocity
+            x0, y0, z0 = self.trajectory_start_position
+            pxr = x0 + a * (np.cos(omega * t) - 1.0)
+            pyr = y0 + a *  np.sin(omega * t)
+            pzr = z0
+            vxr = -a * omega * np.sin(omega * t)
+            vyr =  a * omega * np.cos(omega * t)
+            vzr = 0.0
+        elif self.trajectory_type == 'target_tracking':
+            if hasattr(self, 'target_position'):
+                target_pos = np.array(self.target_position)
+            else:
+                target_pos = np.array(self.trajectory_start_position)  # fallback if no target position received yet
+            pxr, pyr, pzr = target_pos
+            vxr, vyr, vzr = 0.0, 0.0, 0.0  # assuming we want to hover at the target position
+
+        return np.array([pxr,pyr,pzr,vxr,vyr,vzr,0.,0.,0.])
+
+
 
 
     def navigator(self, t):
@@ -229,7 +287,16 @@ class CrazyflieMPC(rclpy.node.Node):
     #       ae740_crazyflie_sim/ros2_ws/src/crazyswarm2/crazyflie_interfaces/msg/AttitudeSetpoint.msg
     #
     # def cmd_attitude_setpoint(...
-
+    def cmd_attitude_setpoint(self, roll: float, pitch: float, yaw_rate: float, thrust: int):
+        msg = AttitudeSetpoint()
+        msg.roll = roll
+        msg.pitch = pitch
+        msg.yaw_rate = yaw_rate
+        msg.thrust = thrust
+        self.attitude_setpoint_pub.publish(msg)
+        
+        
+        
 
     def thrust_to_pwm(self, collective_thrust: float) -> int:
         # omega_per_rotor = 7460.8*np.sqrt((collective_thrust / 4.0))
@@ -265,6 +332,65 @@ class CrazyflieMPC(rclpy.node.Node):
         #   1. Study the structure of trajectory from the self.navigator(t) function 
         #   2. Remember that self.position etc. are all python lists (not numpy arrays)
         #   3. Use the solve_mpc() method from the mpc_solver object, see the function in the tracking_mpc.py file
+
+        # current state (lists -> numpy array)
+        x0 = np.array([*self.position, *self.velocity, *self.attitude], dtype=float)
+
+        traj_all = np.asarray(trajectory, dtype=float)
+
+        # Ensure (9, N+1)
+        if traj_all.shape[1] == self.mpc_N:
+            traj_all = np.concatenate([traj_all, traj_all[:, -1:]], axis=1)
+
+        # Finite-difference velocities from position refs
+        dt = float(self.mpc_tf) / float(self.mpc_N)
+        pos = traj_all[0:3, :]
+        vel_fd = np.zeros_like(pos)
+        vel_fd[:, :-1] = (pos[:, 1:] - pos[:, :-1]) / dt
+        vel_fd[:, -1]  = vel_fd[:, -2]
+
+        # Cap vertical speed gently
+        vz_max = 0.10
+        vel_fd[2, :] = np.clip(vel_fd[2, :], -vz_max, vz_max)
+        traj_all[3:6, :] = vel_fd
+
+        # Hold current yaw as reference (wrapped)
+        def wrap(a): return ((a + np.pi) % (2.0 * np.pi)) - np.pi
+        yaw_r = wrap(self.attitude[2]) if len(self.attitude) == 3 else 0.0
+        traj_all[6, :] = 0.0
+        traj_all[7, :] = 0.0
+        traj_all[8, :] = yaw_r
+
+        # Ease terminal jump if the last step is large: duplicate last-1 into last
+        if np.linalg.norm(traj_all[0:3, -1] - traj_all[0:3, -2]) > 0.03:
+            traj_all[:, -1] = traj_all[:, -2]
+
+        yref   = traj_all[:, :self.mpc_N]
+        yref_e = traj_all[:, self.mpc_N]
+
+
+        # Warm start the solver
+        ocp = self.mpc_solver.ocp_solver
+        N = self.mpc_N
+        u_hover = self.mpc_solver.hover_control.copy()
+
+        for i in range(N):
+            ocp.set(i, 'x', yref[:, i])
+        ocp.set(N, 'x', yref_e)
+
+        for i in range(N):
+            ocp.set(i, 'u', u_hover)
+
+        ocp.set(0, 'x', x0)
+
+
+        # print(f"Solving MPC at t={t:.2f}s with x0={x0}, yref={yref}, and yref_e={yref_e}")
+
+        
+        # solve the MPC
+        status, x_mpc, u_mpc = self.mpc_solver.solve_mpc(x0, yref, yref_e)
+        if status != 0:
+            self.get_logger().warning(f"MPC solver returned non-zero status: {status}")
 
 
         self.control_queue = deque(u_mpc)
