@@ -50,8 +50,8 @@ class CrazyflieMPC(rclpy.node.Node):
 
         self.flight_mode = 'idle'
         self.trajectory_t0 = self.get_clock().now()
-        # self.trajectory_type = 'horizontal_circle'
-        self.trajectory_type = 'lemniscate'
+        self.trajectory_type = 'horizontal_circle'
+        #self.trajectory_type = 'lemniscate'
         self.plot_trajectory = True
         
         self.motors = Motors.MOTOR_CLASSIC # MOTOR_CLASSIC, MOTOR_UPGRADE
@@ -190,8 +190,8 @@ class CrazyflieMPC(rclpy.node.Node):
             a = 1.0 # radius
             omega = 0.2 # angular velocity
             x0, y0, z0 = self.trajectory_start_position
-            pxr = x0 + a * (np.cos(omega * t) - 1.0)
-            pyr = y0 + a *  np.sin(omega * t)
+            pxr = x0 + a * (np.cos(omega * t))
+            pyr = y0 + a * np.sin(omega * t)
             pzr = z0
             vxr = -a * omega * np.sin(omega * t)
             vyr =  a * omega * np.cos(omega * t)

@@ -69,13 +69,13 @@ class TrajectoryTrackingMpc:
         # ---- Cost weights ----
         # State order: [px, py, pz, vx, vy, vz, roll, pitch, yaw]
         Q = np.diag([
-            20.0, 20.0, 40.0,   # positions
-            4.0,  4.0,  6.0,    # velocities
-            8.0,  8.0,  4.0     # roll, pitch, yaw
+            2.5, 2.5, 2.5,   # positions
+            1.0,  1.0,  1.0,    # velocities
+            1.0,  1.0,  1.0     # roll, pitch, yaw
         ])
         # Control order: [roll_c, pitch_c, yaw_c, thrust]
         # Keep thrust penalty small; we track it around hover via yref anyway.
-        R = np.diag([2.0,   2.0,   0.5,   1e-3])
+        R = np.diag([2.0,   2.0,   2.0,   4.0])
         W = block_diag(Q, R)
 
         # ---- Constraints ----
