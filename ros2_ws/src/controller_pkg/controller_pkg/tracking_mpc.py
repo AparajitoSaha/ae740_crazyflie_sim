@@ -69,22 +69,22 @@ class TrajectoryTrackingMpc:
         # ---- Cost weights ----
         # State order: [px, py, pz, vx, vy, vz, roll, pitch, yaw]
         Q = np.diag([
-            20.0, 20.0, 40.0,   # positions
-            4.0,  4.0,  6.0,    # velocities
-            8.0,  8.0,  4.0     # roll, pitch, yaw
+            2.5, 2.5, 2.5,   # positions
+            1.0,  1.0,  1.0,    # velocities
+            1.0,  1.0,  1.0     # roll, pitch, yaw
         ])
         # Control order: [roll_c, pitch_c, yaw_c, thrust]
         # Keep thrust penalty small; we track it around hover via yref anyway.
-        R = np.diag([2.0,   2.0,   0.5,   1e-3])
+        R = np.diag([2.0,   2.0,   2.0,   4.0])
         W = block_diag(Q, R)
 
         # ---- Constraints ----
-        max_angle    = np.radians(30.0)                    # rad
-        max_thrust   = 2.0 * self.quad.mass * self.quad.gravity   # N (≈ 2g headroom)
-        max_height   = 3.0                                 # m
-        max_velocity = 3.0                                 # m/s
-        max_X        = 5.0                                 # m
-        max_Y        = 5.0                                 # m
+        max_angle    = np.radians(60.0)                    # rad
+        max_thrust   = 4.0 * self.quad.mass * self.quad.gravity   # N
+        max_height   = 10.0                                 # m
+        max_velocity = 5.0                                 # m/s
+        max_X        = 10.0                                 # m
+        max_Y        = 10.0                                 # m
 
         ocp.cost.cost_type = 'LINEAR_LS'
         ocp.cost.Vx = np.vstack([np.identity(nx), np.zeros((nu,nx))])
@@ -122,11 +122,68 @@ class TrajectoryTrackingMpc:
         ocp.solver_options.print_level = 0
         
         AcadosOcpSolver.generate(ocp, json_file=json_file)
-        AcadosOcpSolver.build(ocp.code_export_directory, with_cython=True)
+        from pathlib import Path
+        import os
+
+        from pathlib import Path
+        import os
+        import importlib
+        import acados_template  # <-- key addition
+
+        cg_dir = Path(ocp.code_export_directory)  # .../acados_generated_files/c_generated_code
+        mk = cg_dir / "Makefile"
+
+        # Resolve the template dir:
+        # 1) honor env var if provided
+        # 2) otherwise derive from the installed package location
+        pkg_templates_dir = Path(acados_template.__file__).resolve().parent  # .../site-packages/acados_template
+        templ_dir = os.environ.get("ACADOS_PYTHON_INTERFACE_PATH", str(pkg_templates_dir))
+
+        if mk.exists():
+            txt = mk.read_text()
+            needle = "$(INCLUDE_PATH)/../interfaces/acados_template/acados_template"
+            if needle in txt:
+                txt = txt.replace(needle, templ_dir)
+                mk.write_text(txt)
+
+
+        # cg_dir = Path(ocp.code_export_directory)  # .../acados_generated_files/c_generated_code
+        # mk = cg_dir / "Makefile"
+
+        # # Patch the generated Makefile so Cython includes the correct template folder
+        # if mk.exists():
+        #     txt = mk.read_text()
+        #     templ_dir = os.environ.get(
+        #         "ACADOS_PYTHON_INTERFACE_PATH",
+        #         "/home/robin/ae740_labs/acados/interfaces/acados_template/acados_template",
+        #     )
+        #     txt = txt.replace(
+        #         "$(INCLUDE_PATH)/../interfaces/acados_template/acados_template",
+        #         templ_dir
+        #     )
+            mk.write_text(txt)
+
+        # now build
+        AcadosOcpSolver.build(cg_dir, with_cython=True)
+        # AcadosOcpSolver.build(ocp.code_export_directory, with_cython=True)
 
         if self.acados_generated_files_path.is_dir():
             sys.path.append(str(self.acados_generated_files_path))
         acados_ocp_solver_pyx = importlib.import_module('c_generated_code.acados_ocp_solver_pyx')
+        
+        # from pathlib import Path
+        # cg_dir = ocp.code_export_directory  # this is .../acados_generated_files/c_generated_code
+        # pyx_so = Path(cg_dir) / 'acados_ocp_solver_pyx.so'
+
+        # if not pyx_so.exists():
+        #     AcadosOcpSolver.generate(ocp, json_file=json_file)
+        #     AcadosOcpSolver.build(cg_dir, with_cython=True)
+
+        # # import the already-built module
+        # if self.acados_generated_files_path.is_dir():
+        #     sys.path.append(str(self.acados_generated_files_path))
+        # acados_ocp_solver_pyx = importlib.import_module('c_generated_code.acados_ocp_solver_pyx')
+
         self.ocp_solver = acados_ocp_solver_pyx.AcadosOcpSolverCython(self.model_name, 'SQP', self.num_steps)
 
 
