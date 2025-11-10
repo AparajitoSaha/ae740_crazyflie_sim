@@ -147,7 +147,7 @@ class CrazyflieMPC(rclpy.node.Node):
         
 
     def set_random_features(self):
-
+        #TODO:
         # [TODO] SSI PART: Draw random features (w,b in the paper) based on Gaussian kernel. 
         #
         # From the __init__() function, the Gaussian distribution has standard deviation self.kernel_std.
@@ -161,7 +161,9 @@ class CrazyflieMPC(rclpy.node.Node):
         # 
         # self.omega = ...
         # self.b = ... 
-
+        
+        self.omega = np.random.normal(0.0, self.kernel_std, (self.n_rf, len(self.input_mask)))
+        self.b = np.random.uniform(0.0, 2.0 * np.pi, (self.n_rf, 1))
         return
 
 
@@ -189,6 +191,7 @@ class CrazyflieMPC(rclpy.node.Node):
         self.attitude = [wrap(roll), wrap(pitch), wrap(yaw)]
         self.get_logger().info(f"pos={self.position}, rpy={self.attitude}")
 
+        #TODO:
         #### SSI Part: New additions
         self.current_time_stamp = msg.header.stamp
 
@@ -322,6 +325,7 @@ class CrazyflieMPC(rclpy.node.Node):
         t = (self.get_clock().now() - self.trajectory_t0).nanoseconds / 10.0**9
         trajectory = self.navigator(t)
 
+        #TODO:
         #### SSI Part: New additions 
         if self.last_time_stamp == None:
             self.last_time_stamp = self.current_time_stamp

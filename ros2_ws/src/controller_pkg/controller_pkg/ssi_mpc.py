@@ -71,7 +71,8 @@ class SSIMpc:
         self.f=f # this can be used by substituting numerical values eg. self.f(self.x, self.u, self.alpha)
 
 
-    def ssi_augmented_model(self):
+    def ssi_augmented_model(self): 
+        #TODO: 
         # [TODO] SSI PART: Model based on symbolic Casadi variables and additional parametric terms based on learned model
         #
         # Instructions: 
@@ -88,8 +89,33 @@ class SSIMpc:
         # - You can note that the augemented term also has direct dependence to current state/control variables 
         #   self.x and self.u because of the definition of self.rf in the __init__().  
         
+        # ----- Nominal simplified quad model (Euler angles, thrust input) -----
+        roll  = self.e[0]
+        pitch = self.e[1]
+        yaw   = self.e[2]
 
-        
+        c_r = cos(roll);  s_r = sin(roll)
+        c_p = cos(pitch); s_p = sin(pitch)
+        c_y = cos(yaw);   s_y = sin(yaw)
+
+        # Third column of R (ZYX convention)
+        r3x = c_y * s_p * c_r + s_y * s_r
+        r3y = s_y * s_p * c_r - c_y * s_r
+        r3z = c_p * c_r
+        R_col3 = cs.vertcat(r3x, r3y, r3z)
+
+        # Position, velocity, attitude dynamics (nominal)
+        p_dot = self.v
+
+        T_over_m = self.u[3] / self.quad.mass
+        v_dot = T_over_m * R_col3 - cs.vertcat(0.0, 0.0, self.quad.gravity)
+
+        tau = self.quad.tau
+        e_dot = cs.vertcat(
+            (self.u[0] - self.e[0]) / tau,
+            (self.u[1] - self.e[1]) / tau,
+            self.u[2]
+        )        
 
         return cs.vertcat(p_dot, v_dot, e_dot) + cs.vertcat(cs.mtimes(self.alpha, self.rf))
 
@@ -273,7 +299,7 @@ class SSIMpc:
         x_in = self.x_last
         u_in = self.u_last
 
-
+        #TODO: 
         # [TODO] SSI Part: The recursive least-squares update based on Algorithm 1 in the paper. 
         # 
         # Note:
@@ -286,7 +312,21 @@ class SSIMpc:
         # 
         # [...intermediate steps...]
         # alpha_out = ... 
-        
+                
+        # Features at z_{t-1} = [x_{t-1}; u_{t-1}]
+        Z = np.hstack((x_in, u_in)).reshape(-1, 1)  # ((state+u) x 1)
+        rf = (1.0/np.sqrt(self.n_rf)) * np.cos(self.omega @ (self.Bz @ Z) + self.b)  # (n_rf x 1)
+
+        # One-step prediction WITH current alpha (Euler)
+        x_dot_with_alpha = np.array(self.f(x=x_in, u=u_in, alpha=alpha_in)['x_dot']).reshape(-1)
+        x_pred = x_in + dt * x_dot_with_alpha
+
+        # Error on target channels 
+        error_pred = (self.Bh.T @ (x_pred.reshape(-1,1) - x_now.reshape(-1,1))) / dt   # (len(target_mask) x 1)
+
+        # Gradient step
+        alpha_out = alpha_in - 2.0 * self.learning_rate * (error_pred @ rf.T)
+
 
 
         # log latest values
