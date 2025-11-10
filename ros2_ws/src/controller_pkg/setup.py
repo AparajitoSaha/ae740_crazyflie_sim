@@ -27,6 +27,7 @@ setup(
         'console_scripts': [
             'crazyflie_mpc_controller = controller_pkg.crazyflie_mpc:main',
             'target_tracking_controller = controller_pkg.target_tracking_mpc:main', # [LAB 4]
+            'ssi_mpc_controller = controller_pkg.crazyflie_ssi_mpc_node:main', # [LAB 8]
         ],
     },
 )

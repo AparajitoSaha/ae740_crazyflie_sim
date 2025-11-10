@@ -1,7 +1,8 @@
 robots:
   cf_1:
     enabled: true
-    uri: radio://0/80/2M/E7E7E7E7E7
+    uri: udp://0.0.0.0:19850
+    # uri: radio://0/80/2M/E7E7E7E7E7
     initial_position:
       - 0
       - 0

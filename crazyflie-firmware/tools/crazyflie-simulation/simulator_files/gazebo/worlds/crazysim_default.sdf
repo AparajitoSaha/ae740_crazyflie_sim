@@ -18,6 +18,13 @@
     <gravity>0 0 -9.80665</gravity>
     <magnetic_field>6e-06 2.3e-05 -4.2e-05</magnetic_field>
     <atmosphere type='adiabatic'/>
+
+     <wind>
+         <linear_velocity>1 1 0</linear_velocity>
+     </wind>
+
+
+
     <scene>
       <grid>false</grid>
       <ambient>0.4 0.4 0.4 1</ambient>

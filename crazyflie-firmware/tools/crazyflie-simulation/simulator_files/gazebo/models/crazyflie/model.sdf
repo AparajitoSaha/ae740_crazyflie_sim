@@ -13,6 +13,12 @@ Copyright (c) 2022 Bitcraze
 
 <sdf version="1.8">
     <model name="crazyflie">
+
+    
+         <enable_wind>true</enable_wind> <!-- Add this line -->
+
+
+
         <self_collide>false</self_collide>
         <pose>0 0 0.0 0 0 3.14</pose>
         <link name="crazyflie/body">

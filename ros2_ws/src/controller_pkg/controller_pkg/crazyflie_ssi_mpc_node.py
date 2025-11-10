@@ -409,7 +409,7 @@ class CrazyflieMPC(rclpy.node.Node):
 
         
         # solve the MPC
-        status, x_mpc, u_mpc = self.mpc_solver.solve_mpc(x0, yref, yref_e)
+        status, x_mpc, u_mpc = self.mpc_solver.solve_mpc(x0, yref, yref_e, dt)
         if status != 0:
             self.get_logger().warning(f"MPC solver returned non-zero status: {status}")
             
