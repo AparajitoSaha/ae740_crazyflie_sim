@@ -71,7 +71,7 @@ class CrazyflieMPC(rclpy.node.Node):
         self.n_rf = 50
         self.lr = 0.1
         self.kernel = 'Gaussian'
-        self.kernel_std = 1.0
+        self.kernel_std = 0.15
 
         # Input mask decides what features to use amongst the available ones
         self.input_mask = [0,1,2,3,4,5,6,7,8] # takes the features at the given indices 

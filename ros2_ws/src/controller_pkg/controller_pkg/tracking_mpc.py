@@ -69,7 +69,7 @@ class TrajectoryTrackingMpc:
         # ---- Cost weights ----
         # State order: [px, py, pz, vx, vy, vz, roll, pitch, yaw]
         Q = np.diag([
-            2.5, 2.5, 2.5,   # positions
+            1.5, 1.5, 1.5,   # positions
             1.0,  1.0,  1.0,    # velocities
             1.0,  1.0,  1.0     # roll, pitch, yaw
         ])

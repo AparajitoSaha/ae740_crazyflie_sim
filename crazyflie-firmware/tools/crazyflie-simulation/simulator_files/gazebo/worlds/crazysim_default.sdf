@@ -20,7 +20,7 @@
     <atmosphere type='adiabatic'/>
 
      <wind>
-         <linear_velocity>1 1 0</linear_velocity>
+         <linear_velocity>1.0 1.0 0</linear_velocity>
      </wind>
 
 
