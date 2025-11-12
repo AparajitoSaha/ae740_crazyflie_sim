@@ -69,9 +69,9 @@ class CrazyflieMPC(rclpy.node.Node):
         self.rate = 1/(self.opt_dt)
         self.model_name = "Nominal"
         self.n_rf = 50
-        self.lr = 0.1
+        self.lr = 0.15
         self.kernel = 'Gaussian'
-        self.kernel_std = 0.15
+        self.kernel_std = 0.3
 
         # Input mask decides what features to use amongst the available ones
         self.input_mask = [0,1,2,3,4,5,6,7,8] # takes the features at the given indices 
@@ -147,7 +147,6 @@ class CrazyflieMPC(rclpy.node.Node):
         
 
     def set_random_features(self):
-        #TODO:
         # [TODO] SSI PART: Draw random features (w,b in the paper) based on Gaussian kernel. 
         #
         # From the __init__() function, the Gaussian distribution has standard deviation self.kernel_std.
@@ -327,12 +326,14 @@ class CrazyflieMPC(rclpy.node.Node):
 
         #TODO:
         #### SSI Part: New additions 
-        if self.last_time_stamp == None:
+        # compute sensor/odom dt (time elapsed between pose messages). Keep it in sensor_dt
+        sensor_dt = None
+        if self.last_time_stamp is None:
             self.last_time_stamp = self.current_time_stamp
-            dt = 0.0
+            sensor_dt = 0.0
         else:
-            dt = (self.current_time_stamp.nanosec - self.last_time_stamp.nanosec)/1e9 + (self.current_time_stamp.sec - self.last_time_stamp.sec)
-            self.last_time_stamp = self.current_time_stamp # for the next iteration
+            sensor_dt = (self.current_time_stamp.nanosec - self.last_time_stamp.nanosec) / 1e9 + (self.current_time_stamp.sec - self.last_time_stamp.sec)
+            self.last_time_stamp = self.current_time_stamp  # for the next iteration
 
 
 
@@ -363,12 +364,12 @@ class CrazyflieMPC(rclpy.node.Node):
         if traj_all.shape[1] == self.mpc_N:
             traj_all = np.concatenate([traj_all, traj_all[:, -1:]], axis=1)
 
-        # Finite-difference velocities from position refs
-        dt = float(self.mpc_tf) / float(self.mpc_N)
+        # Finite-difference velocities from position refs (use MPC horizon/N for reference sampling)
+        opt_dt = float(self.mpc_tf) / float(self.mpc_N)
         pos = traj_all[0:3, :]
         vel_fd = np.zeros_like(pos)
-        vel_fd[:, :-1] = (pos[:, 1:] - pos[:, :-1]) / dt
-        vel_fd[:, -1]  = vel_fd[:, -2]
+        vel_fd[:, :-1] = (pos[:, 1:] - pos[:, :-1]) / opt_dt
+        vel_fd[:, -1] = vel_fd[:, -2]
 
         # Cap vertical speed gently
         vz_max = 0.10
@@ -386,9 +387,8 @@ class CrazyflieMPC(rclpy.node.Node):
         if np.linalg.norm(traj_all[0:3, -1] - traj_all[0:3, -2]) > 0.03:
             traj_all[:, -1] = traj_all[:, -2]
 
-        yref   = traj_all[:, :self.mpc_N]
+        yref = traj_all[:, :self.mpc_N]
         yref_e = traj_all[:, self.mpc_N]
-
 
         # Warm start the solver
         ocp = self.mpc_solver.ocp_solver
@@ -404,12 +404,12 @@ class CrazyflieMPC(rclpy.node.Node):
 
         ocp.set(0, 'x', x0)
 
-
         # print(f"Solving MPC at t={t:.2f}s with x0={x0}, yref={yref}, and yref_e={yref_e}")
 
-        
         # solve the MPC
-        status, x_mpc, u_mpc = self.mpc_solver.solve_mpc(x0, yref, yref_e, dt)
+        # pass measured sensor dt (if available) to the SSI update; otherwise fall back to opt_dt
+        dt_for_update = sensor_dt if sensor_dt is not None else opt_dt
+        status, x_mpc, u_mpc = self.mpc_solver.solve_mpc(x0, yref, yref_e, dt_for_update)
         if status != 0:
             self.get_logger().warning(f"MPC solver returned non-zero status: {status}")
             

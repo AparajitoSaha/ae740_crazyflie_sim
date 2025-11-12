@@ -67,7 +67,8 @@ class TrajectoryCompareLogger(Node):
 
     # --- Saving + plotting ---
     def save_and_plot(self):
-        save_dir = "mpc_logs"
+        # Save logs inside the ROS2 package directory so they live together with the node
+        save_dir = os.path.join(os.path.dirname(__file__), "mpc_logs")
         os.makedirs(save_dir, exist_ok=True)
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -76,7 +77,7 @@ class TrajectoryCompareLogger(Node):
         ref = np.array(self.ref_traj)         # shape (T, N, 3)
 
         np.save(f"{save_dir}/{self.label}_gt_{ts}.npy",  gt)
-        np.save(f"{save_dir}/{self.label}_ref_{ts}.npy", ref)
+        # np.save(f"{save_dir}/{self.label}_ref_{ts}.npy", ref)
 
         self.plot(gt, ref, ts, save_dir)
 

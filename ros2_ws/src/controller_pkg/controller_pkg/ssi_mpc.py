@@ -322,7 +322,8 @@ class SSIMpc:
         x_pred = x_in + dt * x_dot_with_alpha
 
         # Error on target channels 
-        error_pred = (self.Bh.T @ (x_pred.reshape(-1,1) - x_now.reshape(-1,1))) / dt   # (len(target_mask) x 1)
+        # error_pred = (self.Bh.T @ (x_pred.reshape(-1,1) - x_now.reshape(-1,1))) / dt   # (len(target_mask) x 1)
+        error_pred = (self.Bh.T @ (x_pred.reshape(-1,1) - x_now.reshape(-1,1)))   # (len(target_mask) x 1)
 
         # Gradient step
         alpha_out = alpha_in - 2.0 * self.learning_rate * (error_pred @ rf.T)
