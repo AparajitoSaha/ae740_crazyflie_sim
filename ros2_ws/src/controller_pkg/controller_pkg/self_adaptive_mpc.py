@@ -229,6 +229,51 @@ class SelfAdaptiveMPC:
         ocp.solver_options.print_level = 0
         
         AcadosOcpSolver.generate(ocp, json_file=json_file)
+        
+        from pathlib import Path
+        import os
+
+        from pathlib import Path
+        import os
+        import importlib
+        import acados_template  # <-- key addition
+
+        cg_dir = Path(ocp.code_export_directory)  # .../acados_generated_files/c_generated_code
+        mk = cg_dir / "Makefile"
+
+        # Resolve the template dir:
+        # 1) honor env var if provided
+        # 2) otherwise derive from the installed package location
+        pkg_templates_dir = Path(acados_template.__file__).resolve().parent  # .../site-packages/acados_template
+        templ_dir = os.environ.get("ACADOS_PYTHON_INTERFACE_PATH", str(pkg_templates_dir))
+
+        if mk.exists():
+            txt = mk.read_text()
+            needle = "$(INCLUDE_PATH)/../interfaces/acados_template/acados_template"
+            if needle in txt:
+                txt = txt.replace(needle, templ_dir)
+                mk.write_text(txt)
+
+
+        # cg_dir = Path(ocp.code_export_directory)  # .../acados_generated_files/c_generated_code
+        # mk = cg_dir / "Makefile"
+
+        # # Patch the generated Makefile so Cython includes the correct template folder
+        # if mk.exists():
+        #     txt = mk.read_text()
+        #     templ_dir = os.environ.get(
+        #         "ACADOS_PYTHON_INTERFACE_PATH",
+        #         "/home/robin/ae740_labs/acados/interfaces/acados_template/acados_template",
+        #     )
+        #     txt = txt.replace(
+        #         "$(INCLUDE_PATH)/../interfaces/acados_template/acados_template",
+        #         templ_dir
+        #     )
+            mk.write_text(txt)
+
+        
+        
+        
         AcadosOcpSolver.build(ocp.code_export_directory, with_cython=True)
 
         if self.acados_generated_files_path.is_dir():
@@ -302,12 +347,19 @@ class SelfAdaptiveMPC:
             target_current = target_now[:3]  # only position
             prediction_error = target_current - y_pred  # shape: (3,)
             
-            # RLS update: alpha_out = alpha_in + learning_rate * prediction_error @ rf^T
-            # For each target dimension (len(target_mask)), update alpha
+            # Gradient-descent update (OGD) on squared error: α <- α + lr * (target - y_pred) * rf
             alpha_out = alpha_in.copy()
             for i in range(len(self.target_mask)):
                 # Gradient descent update: alpha[i,:] += lr * error[i] * rf
                 alpha_out[i, :] = alpha_in[i, :] + self.learning_rate * prediction_error[i] * rf
+
+            # Project each alpha row onto Dj: clip L2-norm to alpha_norm_bound (ΠDj)
+            alpha_bound = self.rf_dict.get('alpha_norm_bound', np.inf)
+            if np.isfinite(alpha_bound):
+                for i in range(alpha_out.shape[0]):
+                    norm_i = np.linalg.norm(alpha_out[i, :])
+                    if norm_i > alpha_bound and norm_i > 0:
+                        alpha_out[i, :] = alpha_out[i, :] * (alpha_bound / norm_i)
         else:
             if self.predictor_type=='multiple_learners':
                 raise NotImplementedError('multiple_learners predictor type not implemented yet')
@@ -427,17 +479,35 @@ class SelfAdaptiveMPC:
             # - In the end, store the final predicted target state in yref_e variable.
             # - Note that yref has shape (nx, N) and yref_e has shape (nx, ), where nx=9, hence fill appropriately.
 
+            # If alpha is uninitialized or near-zero, fall back to using the current measured target
+            alpha_norm = 0.0
+            try:
+                alpha_norm = np.linalg.norm(alpha_in)
+            except Exception:
+                alpha_norm = 0.0
+            use_learned = alpha_norm > 1e-8
+
             for i in range(N):
                 # Construct feature vector for prediction
                 feature_vector = np.concatenate([x_in, u_in, target_memory_vector])
                 z = self.Bz @ feature_vector
-                
+
                 # Compute random features
                 omega_z_plus_b = self.omega @ z + self.b.flatten()
                 rf = (1.0 / np.sqrt(self.n_rf)) * np.cos(omega_z_plus_b)
-                
-                # Predict next target position
-                target_next = self.Bh @ (alpha_in @ rf)
+
+                # Predict next target position. If the learned parameters are effectively zero,
+                # fall back to assuming the target remains at the last measured position to avoid
+                # producing origin (zero) references early in training.
+                if use_learned:
+                    target_next = self.Bh @ (alpha_in @ rf)
+                else:
+                    # use current measured target for first step, then propagate that forward
+                    if i == 0:
+                        target_next = target_now[:3]
+                        print(f"[SelfAdaptiveMPC:{self.model_name}] alpha uninitialized – using measured target {target_next} for prediction")
+                    else:
+                        target_next = target_in
                 
                 # Fill yref: [target_position(3), target_velocity(3), target_attitude(3)]
                 # Compute velocity from position difference to help MPC track better
@@ -448,7 +518,8 @@ class SelfAdaptiveMPC:
                 else:
                     # For subsequent steps, use difference between consecutive predictions
                     yref[3:6, i] = (target_next - target_in) / self.mpc_dt
-                yref[6:9, i] = np.zeros(3)  # target attitude (not predicted, set to zero)
+                # target attitude: keep current pursuer attitude (do not force world frame)
+                yref[6:9, i] = x_in[6:9]
                 
                 target_in = np.copy(target_next)
                 # Update memory vector: shift by 3 (remove oldest) and add latest predicted position
@@ -459,7 +530,7 @@ class SelfAdaptiveMPC:
             yref_e = np.zeros(nx)
             yref_e[0:3] = target_in  # final predicted target position
             yref_e[3:6] = np.zeros(3)  # target velocity
-            yref_e[6:9] = np.zeros(3)  # target attitude 
+            yref_e[6:9] = x_in[6:9]  # maintain current pursuer attitude (do not force world frame)
 
         else:
             if self.predictor_type=='multiple_learners':
@@ -478,7 +549,9 @@ class SelfAdaptiveMPC:
             self.ocp_solver.set(i, 'yref', np.array([*yref[:,i], *self.hover_control]))
         # For terminal step, pad yref_e to match intermediate dimension (13)
         # The terminal cost uses Vx_e to extract only the state part (9 elements)
-        self.ocp_solver.set(N, 'yref', np.array([*yref_e, *self.hover_control]))
+        # self.ocp_solver.set(N, 'yref', np.array([*yref_e, *self.hover_control]))
+        self.ocp_solver.set(N, 'yref', np.array(yref_e))
+
 
         # set the initial state in the solver 
         self.ocp_solver.set(0, 'lbx', x0)

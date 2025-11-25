@@ -53,7 +53,7 @@ class CrazyflieMPC(rclpy.node.Node):
 
         self.trajectory_changed = True
 
-        self.flight_mode = 'idle'
+        self.flight_mode = 'trajectory'
         self.trajectory_t0 = self.get_clock().now()
         self.trajectory_type = 'lemniscate'
         self.plot_trajectory = True
@@ -96,16 +96,16 @@ class CrazyflieMPC(rclpy.node.Node):
 
         name = 'expert_1'
         kernel = 'Gaussian' # kernel type, we only use 'Gaussian' for now
-        kernel_std = 0.1 # standard deviation σK = 0.1 (from paper line 2090)
-        lr = 0.01 # learning rate η (reasonable choice, paper tests various values in ablation study)
+        kernel_std = 0.05 # standard deviation σK = 0.1 (from paper line 2090)
+        lr = 0.25 # learning rate η (reasonable choice, paper tests various values in ablation study)
         mh = 10 # memory horizon τ for past target position history (from paper Fig. 9, line 2134: τ = 10 tested)
         p_type = 'single_learner' # predictor type BONUS PART: 'multiple_learners'
         self.init_expert(name, kernel, kernel_std, lr, mh, p_type, quadrotor_dynamics, mpc_N, mpc_tf)
 
         name = 'expert_2'
         kernel = 'Gaussian' # kernel type, we only use 'Gaussian' for now
-        kernel_std = 1.0 # standard deviation σK = 1.0 (from paper line 2090)
-        lr = 0.01 # learning rate η (reasonable choice, paper tests various values in ablation study)
+        kernel_std = 0.2 # standard deviation σK = 1.0 (from paper line 2090)
+        lr = 0.25 # learning rate η (reasonable choice, paper tests various values in ablation study)
         mh = 10 # memory horizon τ for past target position history (from paper Fig. 9, line 2134: τ = 10 tested)
         p_type = 'single_learner' # predictor type
         self.init_expert(name, kernel, kernel_std, lr, mh, p_type, quadrotor_dynamics, mpc_N, mpc_tf)
@@ -239,8 +239,6 @@ class CrazyflieMPC(rclpy.node.Node):
         # b = ... 
         omega = np.random.normal(0.0, kernel_std, (self.n_rf, n_features))
         b = np.random.uniform(0.0, 2.0 * np.pi, (self.n_rf, 1))
-
-        
 
         return omega, b
 
@@ -458,16 +456,16 @@ class CrazyflieMPC(rclpy.node.Node):
         # SOLVER CALL AT EVERY ITERATION
         # status, x_mpc, u_mpc, yref, yref_e = ... 
     
-        # Check if we have valid state data
-        if not self.position or not self.velocity or not self.attitude:
-            return
+        # # Check if we have valid state data
+        # if not self.position or not self.velocity or not self.attitude:
+        #     return
         
-        if not hasattr(self, 'target_position') or not self.target_position:
-            return
+        # if not hasattr(self, 'target_position') or not self.target_position:
+        #     return
         
-        # Set is_flying to True when we have valid target data (so cf2 starts following cf1 when cf1 takes off)
-        if not self.is_flying:
-            self.is_flying = True
+        # # Set is_flying to True when we have valid target data (so cf2 starts following cf1 when cf1 takes off)
+        # if not self.is_flying:
+        #     self.is_flying = True
         
         # x0 = ... (numpy array (size=9) of the crazyflie state -> position, velocity, attitude)
         x0 = np.array([*self.position, *self.velocity, *self.attitude], dtype=float)
@@ -477,10 +475,10 @@ class CrazyflieMPC(rclpy.node.Node):
         
         # COMPLETED CODE
         for expert_idx, expert in enumerate(self.mpc_expert_list):
-            # # Update the alpha value based on the current observed state
+            # Update the alpha value based on the current observed state
             expert.update_step(dt, x_now=x0, target_now=target_pose) # 'dt' is the time elapsed from the previous update
 
-            # # get prediction error metric for the expert
+            # get prediction error metric for the expert
             self.expert_error_array[expert_idx] = expert.get_prediction_error() 
 
         # # list of expert errors
@@ -499,6 +497,9 @@ class CrazyflieMPC(rclpy.node.Node):
         # SOLVER CALL AT EVERY ITERATION
         selected_expert = self.mpc_expert_list[self.selected_expert_idx]
         status, x_mpc, u_mpc, yref, yref_e = selected_expert.solve_mpc(x0, target_pose, dt)
+
+
+
 
         self.control_queue = deque(u_mpc)
 
