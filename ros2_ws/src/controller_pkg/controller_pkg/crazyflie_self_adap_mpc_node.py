@@ -13,7 +13,7 @@ import pathlib
 
 from nav_msgs.msg import Odometry, Path
 from geometry_msgs.msg import PoseStamped, TwistStamped
-from std_msgs.msg import Empty
+from std_msgs.msg import Empty, Float32MultiArray, Int32MultiArray
 
 from ament_index_python.packages import get_package_share_directory
 
@@ -98,15 +98,15 @@ class CrazyflieMPC(rclpy.node.Node):
         kernel = 'Gaussian' # kernel type, we only use 'Gaussian' for now
         kernel_std = 0.05 # standard deviation σK = 0.1 (from paper line 2090)
         lr = 0.25 # learning rate η (reasonable choice, paper tests various values in ablation study)
-        mh = 10 # memory horizon τ for past target position history (from paper Fig. 9, line 2134: τ = 10 tested)
+        mh = 1 # memory horizon τ for past target position history (from paper Fig. 9, line 2134: τ = 10 tested)
         p_type = 'single_learner' # predictor type BONUS PART: 'multiple_learners'
         self.init_expert(name, kernel, kernel_std, lr, mh, p_type, quadrotor_dynamics, mpc_N, mpc_tf)
 
         name = 'expert_2'
         kernel = 'Gaussian' # kernel type, we only use 'Gaussian' for now
-        kernel_std = 0.2 # standard deviation σK = 1.0 (from paper line 2090)
+        kernel_std = 0.05 # standard deviation σK = 1.0 (from paper line 2090)
         lr = 0.25 # learning rate η (reasonable choice, paper tests various values in ablation study)
-        mh = 10 # memory horizon τ for past target position history (from paper Fig. 9, line 2134: τ = 10 tested)
+        mh = 20 # memory horizon τ for past target position history (from paper Fig. 9, line 2134: τ = 10 tested)
         p_type = 'single_learner' # predictor type
         self.init_expert(name, kernel, kernel_std, lr, mh, p_type, quadrotor_dynamics, mpc_N, mpc_tf)
 
@@ -181,6 +181,17 @@ class CrazyflieMPC(rclpy.node.Node):
         # publisher variable -> self.target_prediction_path_pub
         self.target_prediction_path_pub = self.create_publisher(Path, 'cf_3/mpc_solution_path', 10)
 
+        # --- AS module diagnostic publishers (so the AS logger can subscribe) ---
+        # Publish expert predictions, errors, probs and selected expert so external logger can record them
+        # Topics mirror defaults used by AS logger: /as/expert_preds, /as/expert_errors, /as/expert_probs, /as/expert_selected
+        self.as_preds_pub = self.create_publisher(Float32MultiArray, '/as/expert_preds', 10)
+        self.as_errors_pub = self.create_publisher(Float32MultiArray, '/as/expert_errors', 10)
+        self.as_probs_pub = self.create_publisher(Float32MultiArray, '/as/expert_probs', 10)
+        self.as_selected_pub = self.create_publisher(Int32MultiArray, '/as/expert_selected', 10)
+
+        # Timer to periodically publish AS diagnostics (non-blocking). 10 Hz is a reasonable default.
+        self.as_pub_timer = self.create_timer(0.1, self._publish_as_status)
+
         
 
 
@@ -200,6 +211,56 @@ class CrazyflieMPC(rclpy.node.Node):
         self.control_timer = self.create_timer(1.0/self.rate, self._main_loop)
         self.mpc_timer = self.create_timer(1.0/self.rate, self._mpc_solver_loop)
 
+
+    def _publish_as_status(self):
+        """Publish AS-module diagnostics so the external AS logger can record them.
+
+        We publish whatever is currently available:
+         - expert errors (current vector) -> /as/expert_errors (Float32MultiArray)
+         - expert probs (current P_t) -> /as/expert_probs (Float32MultiArray)
+         - selected expert index -> /as/expert_selected (Int32MultiArray)
+         - expert preds -> /as/expert_preds (Float32MultiArray) if available in self.current_expert_preds
+        """
+        try:
+            # Errors: prefer the latest expert_error_array (shape (P,))
+            err_msg = Float32MultiArray()
+            if hasattr(self, 'expert_error_array') and getattr(self, 'expert_error_array') is not None:
+                err_msg.data = [float(x) for x in np.asarray(self.expert_error_array).ravel()]
+            else:
+                err_msg.data = []
+            self.as_errors_pub.publish(err_msg)
+
+            # Probs: current probability distribution over experts
+            prob_msg = Float32MultiArray()
+            if hasattr(self, 'P_t') and getattr(self, 'P_t') is not None:
+                prob_msg.data = [float(x) for x in np.asarray(self.P_t).ravel()]
+            else:
+                prob_msg.data = []
+            self.as_probs_pub.publish(prob_msg)
+
+            # Selected expert index (single integer)
+            sel_msg = Int32MultiArray()
+            sel_idx = getattr(self, 'selected_expert_idx', None)
+            if sel_idx is None:
+                sel_msg.data = []
+            else:
+                sel_msg.data = [int(sel_idx)]
+            self.as_selected_pub.publish(sel_msg)
+
+            # Preds: publish flattened preds if node code populates self.current_expert_preds (optional)
+            preds_msg = Float32MultiArray()
+            if hasattr(self, 'current_expert_preds') and getattr(self, 'current_expert_preds') is not None:
+                try:
+                    arr = np.asarray(self.current_expert_preds)
+                    preds_msg.data = [float(x) for x in arr.ravel()]
+                except Exception:
+                    preds_msg.data = []
+            else:
+                preds_msg.data = []
+            self.as_preds_pub.publish(preds_msg)
+        except Exception as e:
+            # Don't let publishing exceptions crash the node; log and continue
+            self.get_logger().debug(f"Failed to publish AS status: {e}")
 
 
     

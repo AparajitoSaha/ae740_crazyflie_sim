@@ -30,6 +30,7 @@ setup(
             'ssi_mpc_controller = controller_pkg.crazyflie_ssi_mpc_node:main', # [LAB 8]
             'mpc_logger = controller_pkg.mpc_logger:main', # [LAB 8]
             'self_adaptive_mpc_controller = controller_pkg.crazyflie_self_adap_mpc_node:main', # [LAB 9]
+            'as_logger = controller_pkg.as_logger:main',
         ],
     },
 )
